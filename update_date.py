@@ -29,8 +29,8 @@ def get_sourcelist(username, password):
 
 def main():  
 		#ZTF_name=str(sys.argv[1]) 
-		username = "ysharma"
-		password = "rajom$yashvi7"
+		username = raw_input('Input Marshal username: ')
+		password = getpass.getpass('Password: ')
 		sources = get_sourcelist(username,password)
 		for i,source in enumerate(sources):
 			print "-----------------------------------"

@@ -30,8 +30,8 @@ def get_sourcelist(username, password):
 	return sources, specpage
 
 #ZTF_name = sys.argv[1]
-username = 'ysharma'
-password = 'rajom$yashvi7'
+username = raw_input('Input Marshal username: ')
+password = getpass.getpass('Password: ')
 sources, specpage = get_sourcelist(username,password)
 source_not_reported = []
 SEDM_spec_uploaded = []

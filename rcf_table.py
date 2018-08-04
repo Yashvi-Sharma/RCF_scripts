@@ -204,8 +204,8 @@ def from_ned(lat,lon):
 
   
 #ZTF_name=str(sys.argv[1]) 
-username = "ysharma"
-password = "rajom$yashvi7"
+username = raw_input('Input Marshal username: ')
+password = getpass.getpass('Password: ')
 #### Get program id and source list
 sources, specpage = get_sourcelist(username, password)
 #### Initialize webpage

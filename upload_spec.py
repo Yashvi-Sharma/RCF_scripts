@@ -15,7 +15,7 @@ import glob2
 def makeparser():#def_progname,def_tel_inst,def_obsdate,def_observer,def_reducer):
   parser = argparse.ArgumentParser()
   parser.add_argument("ZTF_name",help="Target name",nargs='+')
-  parser.add_argument("specfile",help="Path to spectrum file")
+  parser.add_argument("--specfile",help="Path to spectrum file")
   parser.add_argument("--spectype",default="object",choices=['object','host','sky'],help="Choose spectrum type from options object,host and sky,"+
                       " by default it is object")
   parser.add_argument("--prog_name",default="Redshift Completeness Factor",help="Mention program name for target")
@@ -118,7 +118,7 @@ def read_header(file,args):
 
 ###### Fetch specfile function
 def get_specfile(name):
-  specfile = glob2.glob('PATH to folder which has specfiles/'+name+'*')[0]
+  specfile = glob2.glob('spec_to_upload/'+name+'*')[0]
   print specfile
   return specfile
 
@@ -126,8 +126,8 @@ def main():
   parser = makeparser()#def_progname,def_tel_inst,def_obsdate,def_observer,def_reducer)
   args = parser.parse_args()
   #print args
-  username = "ysharma"
-  password = "rajom$yashvi7"
+  username = raw_input('Input Marshal username: ')
+  password = getpass.getpass('Password: ')
   r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/list_programs.cgi', auth=(username, password))
   programs = json.loads(r.text)
   #print programs
@@ -145,19 +145,12 @@ def main():
   
     for source in sources:
         if(source['name'] in args.ZTF_name):
-            r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/source_summary.cgi', auth=(username, password),
-                data={'sourceid' : str(source['id'])})
-            ############### To get comment ids
-            # t = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/view_source.cgi', auth=(username, password),data={'name' : str(ZTF_name)})
-            # page = t.content
-            # page_source = lxml.html.fromstring(page)
-            # link=[]
-            # link.extend(page_source.xpath('//a[@class="comment"]/@href'))
-            # print link
-            sourceDict = json.loads(r.text)
   ################### To upload spectra
+            ###### Uncomment following line to automatically fetch specfile, comment out the next line
+            specfile = get_specfile(source['name'])
+            #specfile = args.specfile
             tel,inst,user,obsdate,exptime,reducer,fformat = '','','','','','',''
-            tel,inst,user,obsdate,exptime,reducer,fformat = read_header(args.specfile)
+            tel,inst,user,obsdate,exptime,reducer,fformat = read_header(specfile,args)
             #print tel,inst,user,obsdate,exptime,reducer,fformat
             if(tel == '' or inst == ''):
               telname = args.tel_instrument
@@ -170,9 +163,6 @@ def main():
             if(reducer == ''):
               reducer = args.reducer
             print tel,inst,user,obsdate,exptime,reducer,fformat
-            ###### Uncomment following line and get_specfile function to automatically fetch specfile
-            #specfile = get_specfile(source['name'])
-            specfile = args.specfile
             files = {'upfile' : open(specfile)}
             payload = {'sourceid' : str(source['id']),'spectype':args.spectype,'programid':get_prog_id(args.prog_name),'instrumentid':get_inst_id(telname),
                       'format':fformat,'obsdate':obsdate,'exptime':exptime,'observer':user,'reducedby':reducer,'class':"",'redshift':"",

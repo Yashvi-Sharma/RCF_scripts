@@ -211,10 +211,9 @@ parser = makeparser()
 args = parser.parse_args()
 #print args
 #print args
-username = "ysharma"
-password = "rajom$yashvi7"
-tns_user = 'cfremling'
-tns_pwd = 'acidh+22'
+username = raw_input('Input Marshal username: ')
+password = getpass.getpass('Password: ')
+
 ##### Get Source list for RCF program and spectra list
 sources, specpage = get_sourcelist(username, password)
 #print specpage
@@ -281,7 +280,7 @@ for source in sources:
 		#elif(tel_inst =='LT+SPRAT'):
 
 		##### Get other required info
-		classifiers = 'C. Fremling, Y. Sharma (Caltech) on behalf of the Zwicky Transient Facility (ZTF)'### Change accordingly
+		classifiers = 'C. Fremling (Caltech), Y. Sharma (IIT Bombay), A. Dugas (Caltech) on behalf of the Zwicky Transient Facility (ZTF)'### Change accordingly
 		source_group = 48 ### Require source group id from drop down list, 0 is for None
 		spectypes = np.array(['object','host','sky','arcs','synthetic'])
 		spectype_id = np.where(spectypes==args.spectype)[0][0]+1

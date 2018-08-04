@@ -150,8 +150,8 @@ def from_tns(tnsname):
 
 	return json_data['data']['reply']['host_redshift'], json_data['data']['reply']['internal_name']
 
-username = 'ysharma'
-password = 'rajom$yashvi7'
+username = raw_input('Input Marshal username: ')
+password = getpass.getpass('Password: ')
 sources,specpage = get_sourcelist(username,password)
 
 parser = argparse.ArgumentParser()
@@ -165,7 +165,7 @@ enddate = datetime.datetime.strptime(args.enddate,'%Y-%m-%d')
 outfile = open('tns_upload_info_output.txt','w')
 outfile.write('Source_name IAU_name TNS_upload_date SEDM_spectra_date Saved_on_date \n')
 list_of_sources = []
-for i,source in enumerate(sources[63:]):
+for i,source in enumerate(sources):
 	print source['name']
 	try:
 		r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/source_summary.cgi', auth=(username, password),
@@ -219,7 +219,7 @@ def make_atel(list_of_sources):
 	####### Make atel header
 	atel = open('atel_rcf.txt','w')
 	atel.write('Title : ZTF Bright Transient Survey classifications\n\n'+
-		'Authors : Y. Sharma, Woody Ko, Shaney ,C. Fremling, S. R. Kulkarni, R. Walters, N. Blagorodnova, J. D. Neill (Caltech),'+
+		'Authors : Y. Sharma, H. Ko, W Y. Sze, A. Dugas ,C. Fremling, S. R. Kulkarni, R. Walters, N. Blagorodnova, J. D. Neill (Caltech),'+
 		' A. A. Miller (Northwestern), K. Taggart, D. A. Perley (LJMU), A. Goobar (OKC), M. L. Graham (UW) on behalf of the Zwicky'+
 		' Transient Facility collaboration\n\n')
 	atel.write('The Zwicky Transient Facility (ZTF; ATel #11266) Bright Transient Survey (BTS; ATel #11688) reports classifications'+

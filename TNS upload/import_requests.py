@@ -24,8 +24,8 @@ def main(argv):
         print arg
     
     annotationFile = open('example.json', 'w')
-    username = "fremling"
-    password = "acidh+22"
+    username = raw_input('Input Marshal username: ')
+    password = getpass.getpass('Password: ')
     r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/list_programs.cgi', auth=(username, password))
     programs = json.loads(r.text)
     programidx = -1
