@@ -87,15 +87,24 @@ def basic_data(sourceDict):
 		time.append(sourceDict['uploaded_photometry'][i]['jd'])
 		filt.append(sourceDict['uploaded_photometry'][i]['filter'])
 		lim_mag.append(sourceDict['uploaded_photometry'][i]['limmag'])
-		programid.append(sourceDict['uploaded_photometry'][i]['programid']) ###### Add this
+		programid.append(sourceDict['uploaded_photometry'][i]['programid']) 
 	ind=np.argsort(time)
 	time=np.asarray(time)[ind]
 	mag=np.asarray(mag)[ind]
 	mager=np.asarray(mager)[ind]
 	filt=np.asarray(filt)[ind]
 	lim_mag=np.asarray(lim_mag)[ind]
+	programid=np.asarray(programid)[ind]
 
 	#print time
+	pi_filt=programid==1
+
+	time=np.asarray(time)[pi_filt]
+	mag=np.asarray(mag)[pi_filt]
+	mager=np.asarray(mager)[pi_filt]
+	filt=np.asarray(filt)[pi_filt]
+	lim_mag=np.asarray(lim_mag)[pi_filt]
+	programid=np.asarray(programid)[pi_filt]
   
 	up_ind=[]
 	for i in range(0,len(mag)):
@@ -150,8 +159,8 @@ def from_tns(tnsname):
 
 	return json_data['data']['reply']['host_redshift'], json_data['data']['reply']['internal_name']
 
-username = raw_input('Input Marshal username: ')
-password = getpass.getpass('Password: ')
+username = 'ysharma'
+password = 'rajom$yashvi7'
 sources,specpage = get_sourcelist(username,password)
 
 parser = argparse.ArgumentParser()
@@ -192,7 +201,7 @@ for i,source in enumerate(sources):
 	if(recent_source == True):
 		####### Get data
 		specurl,specdate = get_spectra(specpage,source['name'])
-		specdate = datetime.datetime.strptime(specdate,'%Y%m%d').strftime('%Y-%m-%d')
+		sedmspecdate = datetime.datetime.strptime(specdate,'%Y%m%d').strftime('%Y-%m-%d')
 		disc_date, disc_mag, ra, dec, discfilter = basic_data(sourceDict)
 		sn_redshift,sn_class,time_of_classification = from_viewsourcepage(username,password,source['name'])
 		host_redshift,internal_name = from_tns(tnsname)
@@ -208,7 +217,7 @@ for i,source in enumerate(sources):
 		dec = dec[0:len(dec)-2]
 		####### List of recently uploaded sources
 		outfile.write(source['name']+' '+tnsname+' '+str(tnsuploaddate)[0:10]+'      '+str(specdate)+'       '+saveddate[0:10]+' \n')
-		outarr = [source['name'],tnsname,ra,dec,str(disc_date)[0:10],disc_mag,discfilter,host_redshift,sn_redshift,sn_class,time_of_classification,internal_name]
+		outarr = [source['name'],tnsname,ra,dec,str(disc_date)[0:10],disc_mag,discfilter,host_redshift,sn_redshift,sn_class,str(sedmspecdate),internal_name]
 		list_of_sources.append(outarr)
 	else:
 		continue
