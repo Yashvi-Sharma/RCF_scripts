@@ -11,7 +11,7 @@ import query_tns
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from getpass import getpass
-from upload_to_tns import get_sourcelist, get_program_idx
+from tns_upload_spec import get_sourcelist, get_program_idx
 
 def get_namedate_in_range(startdate, enddate, auth):
 	'''
