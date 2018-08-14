@@ -3,83 +3,88 @@ import json
 import numpy as np
 import datetime
 import jd_to_date as jd2date
-import sys,getopt,argparse
-import simplejson
+import argparse
 from lxml import html 
 import re
 import wget
-import subprocess
 import query_tns
 from astropy import units as u
 from astropy.coordinates import SkyCoord
+from getpass import getpass
+from upload_to_tns import get_sourcelist, get_program_idx
 
-def get_sourcelist(username, password):
-	r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/list_programs.cgi', auth=(username, password))
-	programs = json.loads(r.text)
-	#print programs
-	programidx = -1
-	#print "Programs you are a member of:"
-	for index, program in enumerate(programs):
-		if program['name'] == 'Redshift Completeness Factor':
-			programidx = program['programidx']
-		#print programidx
-	if programidx >= 0:
-		r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/list_program_sources.cgi', auth=(username, password),
-			data={'programidx' : str(programidx)})
-		sources = json.loads(r.text)
-		s = requests.post('http://skipper.caltech.edu:8080/growth-data/spectra/data',auth=(username, password))
-		specpage = html.fromstring(s.content)
-	return sources, specpage
+def get_namedate_in_range(startdate, enddate, auth):
+	'''
+	manual html-parsing mess I made in a hurry. #TODO use html.xpath or something
+	adapted from scrape_TNS_uploads but too different to import
+	faster than loading every single source, even though the initial page load is slow
+	
+	params:
+		startdate: str
+			beginning of acceptable TNS upload dates, inclusive. YYYY-MM-DD
+		enddate: str
+			end of acceptable TNS upload dates, inclusive. YYYY-MM-DD
+		auth: tuple(string, string)
+			growth marshal authorization, eg ('flastname', 'password')
+	
+	returns: results (list of tuples of two strings)
+				 first string is ZTFname, second is TNS_upload_date (YYYY-MM-DD)
+				 eg [('ZTF18abcdefg', '2018-01-01'), ...]
+				 
+				 for objects that:
+					-have been uploaded to TNS before (inclusive) enddate
+					-AND have been uploaded to TNS after (inclusive) startdate
+	'''
 
-def get_spectra(specpage,sourcename):
-	try:
-		#print '//td/a[contains(text(),'+source['name']+')]'
-		speclist = specpage.xpath('//td/a[contains(text(),"'+sourcename+'")]')
-		#print speclist
-		specname=[0]
-		for spec in speclist:
-			if('P60' in spec.text_content() or 'P200' in spec.text_content()):
-				specname.append(spec.text_content())
-		specdate = (specname[-1])[13:21]
-		specurl = 'http://skipper.caltech.edu:8080/growth-data/spectra/data/'+specname[-1]
-		#specfile = wget.download(specurl,out='spectra/')
-	except:
-		specurl,specdate='',''
-		print "No spectra found for this source"
-	return specurl,specdate
+	i = 0
+	results = []
+	while True:
+		t = requests.get("http://skipper.caltech.edu:8080/cgi-bin/growth/list_sources_bare.cgi", auth=auth, 
+						 params={'programidx': get_program_idx(auth),
+								 'sortby': "TNS_upload_date",
+								 'offset': i,
+								'reverse': 1})
+		objs = t.content.split('<a href="view_source.cgi?name=')[1:]
+		for obj in objs:
+			namepart, datepart = obj.split('[TNS_upload_date]:</b></font><font face="MyriadPro-Regular, \'Myriad Pro Regular\', MyriadPro, \'Myriad Pro\', Helvetica, sans-serif, Arial" color="black">\n                            ')[:2]
+			name = namepart[:namepart.find('"')]
+			date = datepart[:10]
+			if date < startdate:
+				break
+			elif date <= enddate:
+				results.append((name, date))
+		if date < startdate or len(objs) < 100:
+			break
+		i += 100
+	return results
 
-def from_viewsourcepage(username,password,sourcename):
-	t = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/view_source.cgi', auth=(username, password),
-		data={'name' : sourcename})
+def from_viewsourcepage(auth, sourcename):
+	t = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/view_source.cgi', 
+					  auth=auth, data={'name' : sourcename})
 	htmltext = html.fromstring(t.content)
-	redshift,classification,time_of_classification = 'None','None','None'
+	
 	#### Get redshift
 	try:
-		line_z = re.compile('\S+').findall((htmltext.xpath('//span/a[contains(font[1]/b/text(),"[redshift]")]')[0]).text_content())
-		redshift = line_z[-1]
-		#print line_z
+		redshift = re.compile('\S+').findall((htmltext.xpath('//span/a[contains(font[1]/b/text(),"[redshift]")]')[0]).text_content())[-1]
 	except:
 		redshift=None
+		
 	#### Get classification
 	try:
 		line_class = ((htmltext.xpath('//span/a[contains(font[1]/b/text(),"[classification]")]')[0]).text_content()).strip()
-		time_of_classification = datetime.datetime.strptime(line_class[0:11],'%Y %b %d').strftime('%Y-%m-%d')
-		startind = line_class.find('[classification]:')
-		classification = line_class[startind+17:].strip()
-		print classification
+		time_of_classification = datetime.datetime.strptime(line_class[:11],'%Y %b %d').strftime('%Y-%m-%d')
+		classification = line_class.split('[classification]:')[1].strip()
+
 		if('[view attachment]' in classification):
 			classification = (classification.replace('[view attachment]','')).strip()
 
 	except:
-		classification='None'
-	#### Get latest SEDM assignment last date
-	# try:
-	# 	line_sedm_enddate = np.atleast_1d(htmltext.xpath('//table/tbody/tr/td[@name="enddate"]/text()'))[-1]
-	# except:
-	# 	line_sedm_enddate = 'None'
-	return redshift,classification,time_of_classification
+		classification = None
+
+	return redshift, classification, time_of_classification
 
 def basic_data(sourceDict):
+	#TODO this needs to be redone in pandas or something so it's comprehensible
 	mag,mager,time,filt,lim_mag,name,programid=[],[],[],[],[],[],[]
 	for i in range (0,len(sourceDict['uploaded_photometry'])):
 		mag.append(sourceDict['uploaded_photometry'][i]['magpsf'])
@@ -87,24 +92,13 @@ def basic_data(sourceDict):
 		time.append(sourceDict['uploaded_photometry'][i]['jd'])
 		filt.append(sourceDict['uploaded_photometry'][i]['filter'])
 		lim_mag.append(sourceDict['uploaded_photometry'][i]['limmag'])
-		programid.append(sourceDict['uploaded_photometry'][i]['programid']) 
+		programid.append(sourceDict['uploaded_photometry'][i]['programid']) ###### Add this
 	ind=np.argsort(time)
 	time=np.asarray(time)[ind]
 	mag=np.asarray(mag)[ind]
 	mager=np.asarray(mager)[ind]
 	filt=np.asarray(filt)[ind]
 	lim_mag=np.asarray(lim_mag)[ind]
-	programid=np.asarray(programid)[ind]
-
-	#print time
-	pi_filt=programid==1
-
-	time=np.asarray(time)[pi_filt]
-	mag=np.asarray(mag)[pi_filt]
-	mager=np.asarray(mager)[pi_filt]
-	filt=np.asarray(filt)[pi_filt]
-	lim_mag=np.asarray(lim_mag)[pi_filt]
-	programid=np.asarray(programid)[pi_filt]
   
 	up_ind=[]
 	for i in range(0,len(mag)):
@@ -120,11 +114,10 @@ def basic_data(sourceDict):
 			lim_mag=99
 		time_lim=99
 		filt_lim='r'
- 	else: 
+	else: 
 		lim_mag=99
 		time_lim=99
 		filt_lim='r'
-	#print up_ind
 
 
 	mag_last=mag[len(mag)-1]
@@ -154,105 +147,148 @@ def from_tns(tnsname):
 	query_tns.url_tns_api="https://wis-tns.weizmann.ac.il/api/get"
 	query_tns.url_tns_sandbox_api="https://sandbox-tns.weizmann.ac.il/api/get"    
 	query_tns.get_obj=[("objname",tnsname[2:]), ("photometry","0"), ("spectra","0")] 
-	response=query_tns.get(query_tns.url_tns_api,query_tns.get_obj)
-	json_data=json.loads(response.text)
+	response = query_tns.get(query_tns.url_tns_api,query_tns.get_obj)
+	json_data = json.loads(response.text)
 
 	return json_data['data']['reply']['host_redshift'], json_data['data']['reply']['internal_name']
 
-username = 'ysharma'
-password = 'rajom$yashvi7'
-sources,specpage = get_sourcelist(username,password)
+def write_atel(args):
+	'''writes an ascii atel to file "atel_rcf_startdate_to_enddate.txt" for objects 
+	   uploaded to TNS within args.startdate to args.enddate, inclusive'''
+	auth = (raw_input('Skipper username: '), getpass())
+	sources = get_sourcelist(auth, return_specpage=False)
+	ztfnames, tnsuploaddates = zip(*get_namedate_in_range(args.startdate, args.enddate, auth))
+	source_ids = get_source_id(ztfnames, auth)
 
-parser = argparse.ArgumentParser()
-parser.add_argument('-startdate',help="Query info from date (enter date in format 'YYYY-MM-DD'",type=str)
-parser.add_argument('-enddate',help="Query info to date (enter date in format 'YYYY-MM-DD'",type=str)
-args = parser.parse_args()
-startdate = datetime.datetime.strptime(args.startdate,'%Y-%m-%d')
-enddate = datetime.datetime.strptime(args.enddate,'%Y-%m-%d')
 
-######### go through all sources and select the ones within given period
-outfile = open('tns_upload_info_output.txt','w')
-outfile.write('Source_name IAU_name TNS_upload_date SEDM_spectra_date Saved_on_date \n')
-list_of_sources = []
-for i,source in enumerate(sources):
-	print source['name']
+	daterange = '{}_to_{}'.format(args.startdate, args.enddate)
+	if args.enddate == str(datetime.date.today()):
+		daterange += '_partial' # there could be new TNS submissions today after you've written the ATel
+		
+	with open('atel_rcf_{}.txt'.format(daterange), 'w') as atel:
+		colwidths = [13, 14, 9, 11, 12, 10, 9, 8, 10, 11]
+		cols = ('Survey Name','   Disc. Name','IAU Name','RA (J2000)','Dec (J2000)','Disc. date','Disc. mag','Redshift','Class','Class. date')
+		for i, col in enumerate(cols):
+			colwidths[i] = max(len(col), colwidths[i])
+		fmtstr = '\n{:>13} | {:>13} | {:>9} | {:>11} | {:>12} | {:>10} | {:<6.2f}({:>1}) | {:>8} | {:>10} |  {:>11} |'
+		
+		atel.write('Title : ZTF Bright Transient Survey classifications\n\n'+
+			'Authors : A. Dugas, C. Fremling, Y. Sharma, H. Ko, S. Sze, S. R. Kulkarni, R. Walters, N. Blagorodnova, J. D. Neill (Caltech),'+
+			' A. A. Miller (Northwestern), K. Taggart, D. A. Perley (LJMU), A. Goobar (OKC), M. L. Graham (UW) on behalf of the Zwicky'+
+			' Transient Facility collaboration\n\n')
+		atel.write('The Zwicky Transient Facility (ZTF; ATel #11266) Bright Transient Survey (BTS; ATel #11688) reports classifications'+
+			' of the following targets. Spectra have been obtained with the Spectral Energy Distribution Machine (SEDM)'+
+			' (range 350-950nm, spectral resolution R~100) mounted on the Palomar 60-inch (P60) telescope (Blagorodnova et. al. 2018, PASP, 130, 5003).'+
+			' Classifications were done with SNID (Blondin & Tonry, 2007, ApJ, 666, 1024). Redshifts are derived from the broad SN features'+
+			' (two decimal points), and from narrow SN features or host galaxy lines (three decimal points).'+
+			' Limits prior to detection and current magnitudes are available on the Transient Name Server (https://wis-tns.weizmann.ac.il). \r\n')
+		atel.write('\n{:>12} | {:>12} | {:>9} | {:>11} | {:>12} | {:>10} | {:<9} | {:>8} | {:>10} | {:>11} | Notes'.format('Survey Name','Disc. Name','IAU Name','RA (J2000)','Dec (J2000)','Disc. date','Disc. mag','Redshift','Class','Class. date'))
+		atel.write('\n' + ' | '.join(['-' * i for i in (12, 12, 9, 11, 12, 10, 9, 8, 10, 11, 5)]))
+		
+		for ztfname in ztfnames:
+			if source_ids.get(ztfname):
+				atel.write(get_ascii_row(ztfname, source_ids[ztfname], auth))
+			else:
+				print "could not find sourceid for", ztfname
+			
+		atel.write('\r\n\r\n ZTF is a project led by PI S. R. Kulkarni at Caltech (see ATEL #11266), and includes IPAC; WIS, Israel; '+
+			'OKC, Sweden; JSI/UMd, USA; UW,USA; DESY, Germany; NRC, Taiwan; UW Milwaukee, USA and LANL USA. ZTF acknowledges the generous '+
+			'support of the NSF under AST MSIP Grant No 1440341. Alert distribution service provided by DIRAC@UW. Alert filtering is being '+
+			'undertaken by the GROWTH marshal system, supported by NSF PIRE grant 1545949. ')
+
+
+def get_source_id(ztfnames, auth, program="Redshift Completeness Factor"):
+	''' takes a list of string ZTF names and finds their integer ids in the marshal
+	param: ztfnames
+		eg ['ZTF18abcdef', 'AT2018cow', ...]
+	param: auth
+		tuple of two strings (username, password)
+	param: program
+		string, name of program in growth marshal. All objects must be saved to that program.
+	returns: sourceids
+		dictionary of ztfname:int, with int to be used for /cgi-bin/growth/source_summary.cgi page'''
+		
+	programidx = get_program_idx(auth, program=program)
+	
+	r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/list_program_sources.cgi', 
+					  auth=auth, data={'programidx' : str(programidx)})
+					  
+	sourceids = {}
+	for source in json.loads(r.content):
+		if source['name'] in ztfnames:
+			sourceids[source['name']] = source['id']
+			
+	return sourceids
+	
+def get_ascii_row(ztfname, sourceid, auth, return_class_date=False):
+	''' makes a formatted row as to be inserted into an ATel ascii table
+		param: ztfname
+			string, usually like ZTF18abcdefg. Internal ZTF name in skipper.caltech marshal
+		param: sourcid
+			integer
+			
+		returns:
+			string, that object's row in the table
+			
+	'''
 	try:
-		r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/source_summary.cgi', auth=(username, password),
-			data={'sourceid' : str(source['id'])})
+		r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/source_summary.cgi', auth=auth,
+							data={'sourceid' : str(sourceid)})
 		sourceDict = json.loads(r.text)
-	except:
-		print "No JSON object was found"
-		continue
-	recent_source = False
-	tnsuploaddate,saveddate,tnsname,sedmspecdate='','','',''
-	annotations = sourceDict['autoannotations']
-	for annot in annotations:
-		if(annot['type']=='TNS_upload_date'):
-			date = datetime.datetime.strptime(annot['comment'][0:10],'%Y-%m-%d')
-			print date
-			if(date>=startdate and date<=enddate):
-				recent_source = True
-				print recent_source
-				tnsuploaddate = date
-		if(annot['type']=='IAU name'):
-			tnsname = annot['comment']
-		if(annot['type']=='Saved_date'):
-			saveddate = annot['comment']
-	if(recent_source == True):
-		####### Get data
-		specurl,specdate = get_spectra(specpage,source['name'])
-		sedmspecdate = datetime.datetime.strptime(specdate,'%Y%m%d').strftime('%Y-%m-%d')
-		disc_date, disc_mag, ra, dec, discfilter = basic_data(sourceDict)
-		sn_redshift,sn_class,time_of_classification = from_viewsourcepage(username,password,source['name'])
-		host_redshift,internal_name = from_tns(tnsname)
-		c = SkyCoord(ra=ra*u.degree, dec=dec*u.degree)
-		ra = c.ra.to_string(unit=u.hour,sep=':')
-		ra = ra[0:len(ra)-2]
-		dec = c.dec.signed_dms
-		if(dec.sign==1.0):
-			sign = '+'
-		else:
-			sign = '-'
-		dec = sign+c.dec.to_string(unit=u.degree,sep=':')
-		dec = dec[0:len(dec)-2]
-		####### List of recently uploaded sources
-		outfile.write(source['name']+' '+tnsname+' '+str(tnsuploaddate)[0:10]+'      '+str(specdate)+'       '+saveddate[0:10]+' \n')
-		outarr = [source['name'],tnsname,ra,dec,str(disc_date)[0:10],disc_mag,discfilter,host_redshift,sn_redshift,sn_class,str(sedmspecdate),internal_name]
-		list_of_sources.append(outarr)
+	except ValueError:
+		print ztfname + ": no JSON object was found, perhaps your credentials were mistyped"
+		raise
+
+	autoannot = {annot['type']:annot['comment'] for annot in sourceDict['autoannotations']}
+	saveddate = autoannot.get('Saved_date')
+	tnsname = autoannot.get('IAU name')
+	'''assert tnsuploaddate == autoannot.get('TNS_upload_date')
+
+	try:
+		assert len(tnsuploaddate) == 10
+	except AssertionError:
+		print "ASSERTION ERROR tns date-------"
+		print len(tnsuploaddate), tnsuploaddate'''
+	
+	print ztfname#, tnsuploaddate
+	
+	disc_date, disc_mag, ra, dec, discfilter = basic_data(sourceDict)
+	sn_redshift, sn_class, time_of_classification = from_viewsourcepage(auth, ztfname) #TODO get from list_sources_growth in get_namedate_in_range
+	host_redshift, internal_name = from_tns(tnsname)
+	
+	c = SkyCoord(ra=ra*u.degree, dec=dec*u.degree)
+	ra = c.ra.to_string(unit=u.hour, sep=':')[:-2]
+	dec = c.dec.signed_dms
+	if dec.sign == 1.0:
+		sign = '+'
 	else:
-		continue
-outfile.close()
-#subprocess.call("gedit tns_upload_info_output.txt",shell=True)
+		sign = '-'
+	dec = sign + c.dec.to_string(unit=u.degree, sep=':')
+	dec = dec[:-2]
+	
+	if host_redshift != None:
+		redshift = round(float(host_redshift), 3) # I think this needs string formatting not rounding - 0.20 will be displayed as 0.2 as long as it's a float
+	elif sn_redshift != None:
+		redshift = round(float(sn_redshift), 3)
+	else:
+		redshift = None
+		
+	disc_mag = round(float(disc_mag), 2)
+	
+	####### List of recently uploaded sources
+	outarr = [ztfname, internal_name, tnsname, ra, dec, str(disc_date)[:10], disc_mag, discfilter, redshift, sn_class, time_of_classification]
+	line = '\n{:>12} | {:>12} | {:>9} | {:>11} | {:>12} | {:>10} | {:<6.2f}({:>1}) | {:>8} | {:>10} | {:>11} |'.format(*outarr)
+	
+	if return_class_date:
+		return line, time_of_classification
+	else:
+		return line
 
-def make_atel(list_of_sources):
-	####### Make atel header
-	atel = open('atel_rcf.txt','w')
-	atel.write('Title : ZTF Bright Transient Survey classifications\n\n'+
-		'Authors : Y. Sharma, H. Ko, W Y. Sze, A. Dugas ,C. Fremling, S. R. Kulkarni, R. Walters, N. Blagorodnova, J. D. Neill (Caltech),'+
-		' A. A. Miller (Northwestern), K. Taggart, D. A. Perley (LJMU), A. Goobar (OKC), M. L. Graham (UW) on behalf of the Zwicky'+
-		' Transient Facility collaboration\n\n')
-	atel.write('The Zwicky Transient Facility (ZTF; ATel #11266) Bright Transient Survey (BTS; ATel #11688) reports classifications'+
-		' of the following targets. Spectra have been obtained with the Spectral Energy Distribution Machine (SEDM)'+
-		' (range 350-950nm, spectral resolution R~100) mounted on the Palomar 60-inch (P60) telescope (Blagorodnova et. al. 2018, PASP, 130, 5003).'+
-		' Classifications were done with SNID (Blondin & Tonry, 2007, ApJ, 666, 1024). Redshifts are derived from the broad SN features'+
-		' (two decimal points), and from narrow SN features or host galaxy lines (three decimal points).'+
-		' Limits prior to detection and current magnitudes are available on the Transient Name Server (https://wis-tns.weizmann.ac.il). \r\n')
-	atel.write('\n{:>13} | {:>13} | {:>9} | {:>11} | {:>12} | {:>10} | {:<9} | {:>8} | {:>10} |  {:>10} | Notes | '.format('Survey Name','Discovery Name','IAU Name','RA (J2000)','Dec (J2000)','Disc. date','Disc. mag','Redshift','Class','Class. date'))
-	atel.write('\n'+'-'*13+' | '+'-'*13+' | '+'-'*9+' | '+'-'*11+' | '+'-'*12+' | '+'-'*10+' | '+'-'*9+' | '+'-'*8+' | '+'-'*10+' | '+'-'*12+' | '+'-'*5+' | ')
 
-	for line in list_of_sources:
-		if line[7]!=None:
-			atel.write('\n{:>13} | {:>13} | {:>9} | {:>11} | {:>12} | {:>10} | {:<6.2f}({:>1}) | {:>8} | {:>10} |  {:>11} |       | '.format(line[0],line[11],line[1],line[2],line[3],line[4],round(float(line[5]),2),line[6],round(float(line[7]),3),line[9],line[10]))
-		elif line[7]==None and line[8]!=None: 
-			atel.write('\n{:>13} | {:>13} | {:>9} | {:>11} | {:>12} | {:>10} | {:<6.2f}({:>1}) | {:>8} | {:>10} |  {:>11} |       | '.format(line[0],line[11],line[1],line[2],line[3],line[4],round(float(line[5]),2),line[6],round(float(line[8]),3),line[9],line[10]))
-		else:   
-			atel.write('\n{:>13} | {:>13} | {:>9} | {:>11} | {:>12} | {:>10} | {:<6.2f}({:>1}) | {:>8} | {:>10} |  {:>11} |       | '.format(line[0],line[11],line[1],line[2],line[3],line[4],round(float(line[5]),2),line[6],None,line[9],line[10]))
-
-	atel.write('\r\n\r\n ZTF is a project led by PI S. R. Kulkarni at Caltech (see ATEL #11266), and includes IPAC; WIS, Israel; '+
-		'OKC, Sweden; JSI/UMd, USA; UW,USA; DESY, Germany; NRC, Taiwan; UW Milwaukee, USA and LANL USA. ZTF acknowledges the generous '+
-		'support of the NSF under AST MSIP Grant No 1440341. Alert distribution service provided by DIRAC@UW. Alert filtering is being '+
-		'undertaken by the GROWTH marshal system, supported by NSF PIRE grant 1545949. ')
-	atel.close()
-
-make_atel(list_of_sources)
-
+if __name__ == "__main__":
+	### parse arguments
+	parser = argparse.ArgumentParser()
+	parser.add_argument('-startdate', help="Query info from [TNS_upload_date] inclusive (YYYY-MM-DD)", type=str)
+	parser.add_argument('-enddate',   help="Query info to   [TNS_upload_date] inclusive (YYYY-MM-DD)", type=str)
+	args = parser.parse_args()
+	write_atel(args)
