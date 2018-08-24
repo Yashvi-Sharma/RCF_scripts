@@ -70,7 +70,8 @@ def check_assignment(name,username,password):
 	return to_assign
 
 def check_spectra(name,username,password):
-	s = requests.post('http://skipper.caltech.edu:8080/growth-data/spectra/data',auth=(username, password))
+	url = open('urlfile','r').readlines()[0]
+	s = requests.post(url,auth=(username, password))
 	specpage = html.fromstring(s.content)
 	spec_exists = False
 	try:
@@ -79,7 +80,7 @@ def check_spectra(name,username,password):
 		for spec in speclist:
 			specname.append(spec.text_content())
 		specdate = (specname[-1])[13:21]
-		specurl = 'http://skipper.caltech.edu:8080/growth-data/spectra/data/'+specname[-1]
+		specurl = url+specname[-1]
 		spec_exists = True
 		#specfile = wget.download(specurl,out='spectra/')
 	except:

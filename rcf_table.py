@@ -28,7 +28,8 @@ def get_sourcelist(username, password):
 		r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/list_program_sources.cgi', auth=(username, password),
 			data={'programidx' : str(programidx)})
 		sources = json.loads(r.text)
-		s = requests.post('http://skipper.caltech.edu:8080/growth-data/spectra/data',auth=(username, password))
+		url = open('urlfile','r').readlines()[0]
+		s = requests.post(url,auth=(username, password))
 		specpage = html.fromstring(s.content)
 	return sources, specpage
 
@@ -175,7 +176,8 @@ def get_spectra(specpage,sourcename):
 		for spec in speclist:
 			specname.append(spec.text_content())
 		specdate = (specname[-1])[13:21]
-		specurl = 'http://skipper.caltech.edu:8080/growth-data/spectra/data/'+specname[-1]
+		url = open('urlfile','r').readlines()[0]
+		specurl = url+specname[-1]
 		#specfile = wget.download(specurl,out='spectra/')
 	except:
 		specurl,specdate='',''

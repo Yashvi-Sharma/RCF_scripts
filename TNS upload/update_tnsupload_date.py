@@ -25,7 +25,8 @@ def get_sourcelist(username, password):
 		r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/list_program_sources.cgi', auth=(username, password),
 			data={'programidx' : str(programidx)})
 		sources = json.loads(r.text)
-		s = requests.post('http://skipper.caltech.edu:8080/growth-data/spectra/data',auth=(username, password))
+		url = open('urlfile','r').readlines()[0]
+		s = requests.post(url,auth=(username, password))
 		specpage = html.fromstring(s.content)
 	return sources, specpage
 

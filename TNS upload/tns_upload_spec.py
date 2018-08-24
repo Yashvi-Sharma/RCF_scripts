@@ -117,7 +117,8 @@ def get_sourcelist(username, password):
 		r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/list_program_sources.cgi', auth=(username, password),
 			data={'programidx' : str(programidx)})
 		sources = json.loads(r.text)
-		s = requests.post('http://skipper.caltech.edu:8080/growth-data/spectra/data',auth=(username, password))
+		url = open('urlfile','r').readlines()[0]
+		s = requests.post(url,auth=(username, password))
 		specpage = html.fromstring(s.content)
 	return sources, specpage
 
@@ -237,14 +238,15 @@ for source in sources:
 		except:
 			print "ERROR! No spectra found for this source, exiting"
 			raise SystemExit
-		specurl = 'http://skipper.caltech.edu:8080/growth-data/spectra/data/'+specname[-1]
+		url = open('urlfile','r').readlines()[0]
+		specurl = url+specname[-1]
 		confirm_spectrum=raw_input(specurl+' ?(y/n) ')
 		if(confirm_spectrum=='y'):
 			specfile = wget.download(specurl)
 		else:
 			print specname
 			specf = raw_input('Choose spectrum file: ')
-			specurl = 'http://skipper.caltech.edu:8080/growth-data/spectra/data/'+specf
+			specurl = url+specf
 			specfile = wget.download(specurl)
 		print specfile
 
