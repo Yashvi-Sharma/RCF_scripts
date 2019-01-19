@@ -289,12 +289,12 @@ for index,source in enumerate(sources[0:]):
 	if(specurl!=''):
 		tbl.write('<tr><td> '+str(index)+' </td><td>'+source['name']+' </td><td> '+tnsname+' </td><td><a href="'+specurl+'"> Spectra available </a>'+specdate+' </td><td> '+
 			classification+' </td><td> '+time_of_classification+' </td><td> '+tnsupload_date+' </td><td> '+str(sedm_enddate)+' </td><td> '+str(redshift)+
-			' </td><td> '+host_redshift+' </td><td> '+sep_arcmin+' </td><td> '+saved_date+' </td><td> '+str(obsdate)+' </td><td> '+
+			' </td><td> '+str(host_redshift)+' </td><td> '+str(sep_arcmin)+' </td><td> '+saved_date+' </td><td> '+str(obsdate)+' </td><td> '+
 			str(mag)+' </td><td> '+str(ra)+' </td><td> '+str(dec)+' </td><td> '+str(hit)+' </td><td></tr>\n ')
 	else:
 		tbl.write('<tr><td> '+str(index)+' </td><td>'+source['name']+' </td><td> '+tnsname+' </td><td> Spectra not available </td><td> '+
 			classification+' </td><td> '+time_of_classification+' </td><td> '+tnsupload_date+' </td><td> '+str(sedm_enddate)+' </td><td> '+str(redshift)+
-			' </td><td> '+host_redshift+' </td><td> '+sep_arcmin+' </td><td> '+saved_date+' </td><td> '+str(obsdate)+' </td><td> '+
+			' </td><td> '+str(host_redshift)+' </td><td> '+str(sep_arcmin)+' </td><td> '+saved_date+' </td><td> '+str(obsdate)+' </td><td> '+
 			str(mag)+' </td><td> '+str(ra)+' </td><td> '+str(dec)+' </td><td> '+str(hit)+' </td><td></tr>\n ')
 tbl.write('</table></body></html>')
 SN_classes = np.unique(SN_class,return_counts=True)
