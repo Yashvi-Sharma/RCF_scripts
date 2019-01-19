@@ -7,7 +7,7 @@ import sys,getopt,argparse
 import simplejson
 from lxml import html 
 import re
-import wget
+import wget, getpass
 import subprocess
 import query_tns
 from astropy import units as u
@@ -161,8 +161,8 @@ def from_tns(tnsname):
 
 	return json_data['data']['reply']['host_redshift'], json_data['data']['reply']['internal_name']
 
-username = 'ysharma'
-password = 'rajom$yashvi7'
+username = raw_input("Input Marshal username : ")
+password = getpass.getpass("Input password : ")
 sources,specpage = get_sourcelist(username,password)
 
 parser = argparse.ArgumentParser()

@@ -8,10 +8,10 @@ import sys,getopt,argparse
 import simplejson
 from lxml import html
 import argparse
-import os
+import os, subprocess
 import re
 import wget, pprint
-
+import getpass
 def makeparser():#def_progname,def_tel_inst,def_obsdate,def_observer,def_reducer):
 	parser = argparse.ArgumentParser()
 	parser.add_argument("ZTF_name",help="Target name",nargs='+')
@@ -70,17 +70,19 @@ def read_header(file):
 				inst = hline[2].strip()
 				if('SED' in inst):
 					inst = 'SED-Machine'
-			if(hline[1]=='USER:'):
+			if(hline[1]=='USER:' or hline[1]=='OBSERVER:'):
 				user = ' '.join(x for x in hline[2:])
 				user = user.strip()
 				if(user=='sedmdrp'):
 					user = 'SEDmRobot'
-			if(hline[1]=='OBSUTC:'):
-				obsdate = hline[2]+' '+hline[3][0:8]
+			if(hline[1]=='OBSDATE:'):
+				obsdate = hline[2]+' '
+			if(hline[1]=='OBSTIME:'):
+				obsdate = obsdate + hline[2][0:8]
 				obsdate = datetime.datetime.strptime(obsdate,'%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d %H:%M:%S')
 			if(hline[1]=='EXPTIME:'):
 				exptime = hline[2].strip()
-			if(hline[1]=='REDUCER:'):
+			if(hline[1]=='EXTRACT:'):
 				reducer = ' '.join(x for x in hline[2:])
 				reducer = reducer.strip()
 			if(hline[1]=='OBSERVER'):
@@ -117,10 +119,9 @@ def get_sourcelist(username, password):
 		r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/list_program_sources.cgi', auth=(username, password),
 			data={'programidx' : str(programidx)})
 		sources = json.loads(r.text)
-		url = open('urlfile','r').readlines()[0]
-		s = requests.post(url,auth=(username, password))
-		specpage = html.fromstring(s.content)
-	return sources, specpage
+		# s = requests.post('http://skipper.caltech.edu:8080/growth-data/spectra/data',auth=(username, password))
+		# specpage = html.fromstring(s.content)
+	return sources
 
 def submitSpectraFiles(uploadUrl, fileList, api_key):
 	data = {'api_key' : api_key}
@@ -207,169 +208,184 @@ class TNSClassificationReport:
 	def classificationJson(self):
 		return json.dumps(self.classificationDict())
 
+def get_spectra(sourcename,username,password):
+	mainurl = 'http://skipper.caltech.edu:8080'
+	specpageurl = "http://skipper.caltech.edu:8080/cgi-bin/growth/view_spec.cgi"
+	data = {'name':sourcename}
+	s = requests.post(url=specpageurl,auth=(username, password),data=data)
+	specpage = html.fromstring(s.content)
+	try:
+		#print '//td/a[contains(text(),'+source['name']+')]'
+		speclist = specpage.xpath('//a[contains(text(),"ASCII")]')
+		#print speclist
+		specname=[]
+		for spec in speclist:
+			specname.append(spec.get('href'))
+		#specdate = (specname[-1])[13:21]
+		specurl = mainurl+specname[-1]
+		specfile = os.path.basename(specname[-1])
+		prefix = os.path.dirname(specname[-1])
+		print "All spectrum files are - "
+		for spec in specname:
+			print os.path.basename(spec)
+		proceed = raw_input("Selected file is "+specfile+" .Press enter if this file is ok or enter the name of new file. ")
+		if(proceed != ''):
+			specfile = proceed
+			specurl = mainurl+prefix+'/'+specfile
+		subprocess.call('wget '+specurl,shell=True)
+	except:
+		specurl,specdate='',''
+		specfile = ''
+		print "No spectra found for this source"
+	return specurl,specfile
+
+def main(args,username,password):
+	##### Get Source list for RCF program and spectra list
+	sources = get_sourcelist(username, password)
+	#print specpage
+	for source in sources[900:]:
+		tns_name, specurl, specfile = '','',''
+		if source['name'] in args.ZTF_name:
+			#print "here"
+			r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/source_summary.cgi', auth=(username, password),
+				data={'sourceid' : str(source['id'])})
+			sourceDict = json.loads(r.text)
+			##### Get TNS name
+			for annot in sourceDict['autoannotations']:
+				if(annot['type']=='IAU name'):
+					tns_name = annot['comment']
+			##### Get latest spectrum of object 
+			specname = [0]
+			specurl, specfile = get_spectra(source['name'], username, password)
+
+			t = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/view_source.cgi', auth=(username, password),
+				data={'name' : source['name']})
+			sourcepage = html.fromstring(t.content)
+			#### Get redshift
+			try:
+				line_z = re.compile('\S+').findall((sourcepage.xpath('//span/a[contains(font[1]/b/text(),"[redshift]")]')[0]).text_content())
+				redshift = line_z[-1]
+			except:
+				redshift=raw_input("Please enter SNID redshift if SN Ia: ")
+			#### Get classification
+			try:
+				line_class = ((sourcepage.xpath('//span/a[contains(font[1]/b/text(),"[classification]")]')[0]).text_content()).strip()
+				#time_of_classification = line_class[0:11]
+				startind = line_class.find('[classification]:')
+				classification = line_class[startind+17:].strip()
+				#print classification
+				if('[view attachment]' in classification):
+					classification = (classification.replace('[view attachment]','')).strip()
+			except:
+				classification = raw_input("Classification not found, please enter manually: ")
+			
+			classification = get_classification(classification)
+			##### Get telescope, instrument, observer, obsdate, exptime, reducer and spectrum fileformat
+			tel_inst, observer,obsdate,exptime,reducer,fformat = read_header(specfile)
+			
+			if(tel_inst == 'P60+SED-Machine'):
+				tel_instrument_id = 149
+			elif(tel_inst == 'P200+DBSP'):
+				tel_instrument_id = 1
+			#elif(tel_inst =='LT+SPRAT'):
+
+			##### Get other required info
+			classifiers = 'C. Fremling (Caltech), Y. Sharma (IIT Bombay), A. Dugas (Caltech) on behalf of the Zwicky Transient Facility (ZTF)'### Change accordingly
+			source_group = 48 ### Require source group id from drop down list, 0 is for None
+			spectypes = np.array(['object','host','sky','arcs','synthetic'])
+			spectype_id = np.where(spectypes==args.spectype)[0][0]+1
+			#print spectype_id
+			proprietary_period = '0'
+			proprietary_units = "years"
+			spec_comments =''
+			classification_comments = ''
+
+			if(fformat=='ascii'):
+				files = specfile
+			elif(fformat=='fits'):
+				files = specfile
+
+			sandbox = False
+			if sandbox:
+				TNS_BASE_URL = "https://sandbox-tns.weizmann.ac.il/api/set/"
+				upload_url = "https://sandbox-tns.weizmann.ac.il/api/file-upload"
+				report_url = "https://sandbox-tns.weizmann.ac.il/api/bulk-report"
+				reply_url = "https://sandbox-tns.weizmann.ac.il/api/bulk-report-reply"
+			else:
+				#TNS_BASE_URL = ""#"https://wis-tns.weizmann.ac.il/api/set/"
+				TNS_BASE_URL = "https://wis-tns.weizmann.ac.il/api/set/"
+				upload_url = "https://wis-tns.weizmann.ac.il/api/file-upload"
+				report_url = "https://wis-tns.weizmann.ac.il/api/bulk-report"
+				reply_url = "https://wis-tns.weizmann.ac.il/api/bulk-report-reply"
+
+			API_KEY = "54916f1700966b3bd325fc1189763d86512bda1d"
+
+			start_upload = raw_input("Start upload? (y/n): ")
+			if(start_upload=='y'):
+				##### Upload spectrum file
+				print specfile
+				fileUploadResult = submitSpectraFiles(upload_url, files, API_KEY)
+				res_code = fileUploadResult['id_code']
+				res_message = fileUploadResult['id_message']
+				res_fname = fileUploadResult['data'][-1]
+				print res_code, res_message
+				print "Successfully uploaded spectrum"
+				print res_fname
+				#res_code=200
+
+				##### Upload classification report
+				classificationReport = TNSClassificationReport()
+				classificationReport.name = tns_name[2:]
+				classificationReport.fitsName = ''
+				classificationReport.asciiName = specfile
+				classificationReport.classifierName = classifiers
+				classificationReport.classificationID = classification
+				classificationReport.redshift = redshift
+				classificationReport.classificationComments = classification_comments
+				classificationReport.obsDate = obsdate
+				classificationReport.instrumentID = tel_instrument_id
+				classificationReport.expTime = exptime
+				classificationReport.observers = observer
+				classificationReport.reducers = reducer
+				classificationReport.specTypeID = spectype_id
+				classificationReport.spectrumComments = spec_comments
+				classificationReport.groupID = source_group
+				classificationReport.spec_proprietary_period_value = proprietary_period
+				classificationReport.spec_proprietary_period_units = proprietary_units
+				pprint.pprint(classificationReport.classificationDict(),indent=2)
+				proceed = raw_input("Proceed with classification upload? (y/n) : ")
+				if(proceed[0]=='y'):
+					if res_code == 200:
+						reportResult = submitClassificationReport(report_url, classificationReport, API_KEY)
+						try:
+							res_code = reportResult['id_code']
+							res_message = reportResult['id_message']
+							report_id = reportResult['data']['report_id']
+						except:
+							res_code = '0'
+							res_message = 'Bad response, something went wrong during report submission.'
+
+					if res_code == 200:
+						replyResult = receiveFeedback(reply_url, report_id, API_KEY)
+						try:
+				   			res_code = replyResult['id_code']
+				   			res_message = replyResult['id_message']
+						except:
+				   			res_code = '0'
+				   			res_message = 'Bad response, something went wrong during reply retrieval.'
+					print res_code, res_message
+				if(res_code==200):
+					payload1 = {'action':'commit','id':-1,'sourceid':str(source['id']),'datatype':'STRING','type':'TNS_upload_date','comment':str(datetime.date.today())}
+					b = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/add_autoannotation.cgi', auth=(username, password),
+	                data=payload1)
 
 parser = makeparser()
 args = parser.parse_args()
-#print args
-#print args
-username = raw_input('Input Marshal username: ')
-password = getpass.getpass('Password: ')
+username = 'ysharma'#raw_input("Input Marshal username : ")
+password = 'rajom$yashvi7' #getpass.getpass("Input password : ")
 
-##### Get Source list for RCF program and spectra list
-sources, specpage = get_sourcelist(username, password)
-#print specpage
-for source in sources:
-	tns_name, specurl, specfile = '','',''
-	if source['name'] in args.ZTF_name:
-		#print "here"
-		r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/source_summary.cgi', auth=(username, password),
-			data={'sourceid' : str(source['id'])})
-		sourceDict = json.loads(r.text)
-		##### Get TNS name
-		for annot in sourceDict['autoannotations']:
-			if(annot['type']=='IAU name'):
-				tns_name = annot['comment']
-		##### Get latest spectrum of object 
-		specname = [0]
-		try:
-			speclist = specpage.xpath('//td/a[contains(text(),"'+source['name']+'")]')
-			for spec in speclist:
-				specname.append(spec.text_content())
-		except:
-			print "ERROR! No spectra found for this source, exiting"
-			raise SystemExit
-		url = open('urlfile','r').readlines()[0]
-		specurl = url+specname[-1]
-		confirm_spectrum=raw_input(specurl+' ?(y/n) ')
-		if(confirm_spectrum=='y'):
-			specfile = wget.download(specurl)
-		else:
-			print specname
-			specf = raw_input('Choose spectrum file: ')
-			specurl = url+specf
-			specfile = wget.download(specurl)
-		print specfile
-
-		t = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/view_source.cgi', auth=(username, password),
-			data={'name' : source['name']})
-		sourcepage = html.fromstring(t.content)
-		#### Get redshift
-		try:
-			line_z = re.compile('\S+').findall((sourcepage.xpath('//span/a[contains(font[1]/b/text(),"[redshift]")]')[0]).text_content())
-			redshift = line_z[-1]
-		except:
-			redshift=raw_input("Please enter SNID redshift if SN Ia: ")
-		#### Get classification
-		try:
-			line_class = ((sourcepage.xpath('//span/a[contains(font[1]/b/text(),"[classification]")]')[0]).text_content()).strip()
-			#time_of_classification = line_class[0:11]
-			startind = line_class.find('[classification]:')
-			classification = line_class[startind+17:].strip()
-			#print classification
-			if('[view attachment]' in classification):
-				classification = (classification.replace('[view attachment]','')).strip()
-		except:
-			classification = raw_input("Classification not found, please enter manually: ")
-		
-		classification = get_classification(classification)
-		##### Get telescope, instrument, observer, obsdate, exptime, reducer and spectrum fileformat
-		tel_inst, observer,obsdate,exptime,reducer,fformat = read_header(specfile)
-		
-		if(tel_inst == 'P60+SED-Machine'):
-			tel_instrument_id = 149
-		elif(tel_inst == 'P200+DBSP'):
-			tel_instrument_id = 1
-		#elif(tel_inst =='LT+SPRAT'):
-
-		##### Get other required info
-		classifiers = 'C. Fremling (Caltech), Y. Sharma (IIT Bombay), A. Dugas (Caltech) on behalf of the Zwicky Transient Facility (ZTF)'### Change accordingly
-		source_group = 48 ### Require source group id from drop down list, 0 is for None
-		spectypes = np.array(['object','host','sky','arcs','synthetic'])
-		spectype_id = np.where(spectypes==args.spectype)[0][0]+1
-		#print spectype_id
-		proprietary_period = '3'
-		proprietary_units = "years"
-		spec_comments =''
-		classification_comments = ''
-
-		if(fformat=='ascii'):
-			files = specfile
-		elif(fformat=='fits'):
-			files = specfile
-
-		sandbox = False
-		if sandbox:
-			TNS_BASE_URL = "https://sandbox-tns.weizmann.ac.il/api/set/"
-			upload_url = "https://sandbox-tns.weizmann.ac.il/api/file-upload"
-			report_url = "https://sandbox-tns.weizmann.ac.il/api/bulk-report"
-			reply_url = "https://sandbox-tns.weizmann.ac.il/api/bulk-report-reply"
-		else:
-			#TNS_BASE_URL = ""#"https://wis-tns.weizmann.ac.il/api/set/"
-			TNS_BASE_URL = "https://wis-tns.weizmann.ac.il/api/set/"
-			upload_url = "https://wis-tns.weizmann.ac.il/api/file-upload"
-			report_url = "https://wis-tns.weizmann.ac.il/api/bulk-report"
-			reply_url = "https://wis-tns.weizmann.ac.il/api/bulk-report-reply"
-
-		API_KEY = "54916f1700966b3bd325fc1189763d86512bda1d"
-
-		start_upload = raw_input("Start upload? (y/n): ")
-		if(start_upload=='y'):
-			##### Upload spectrum file
-			fileUploadResult = submitSpectraFiles(upload_url, files, API_KEY)
-			res_code = fileUploadResult['id_code']
-			res_message = fileUploadResult['id_message']
-			res_fname = fileUploadResult['data'][-1]
-			print res_code, res_message
-			print "Successfully uploaded spectrum"
-			print res_fname
-			#res_code=200
-
-			##### Upload classification report
-			classificationReport = TNSClassificationReport()
-			classificationReport.name = tns_name[2:]
-			classificationReport.fitsName = ''
-			classificationReport.asciiName = specfile
-			classificationReport.classifierName = classifiers
-			classificationReport.classificationID = classification
-			classificationReport.redshift = redshift
-			classificationReport.classificationComments = classification_comments
-			classificationReport.obsDate = obsdate
-			classificationReport.instrumentID = tel_instrument_id
-			classificationReport.expTime = exptime
-			classificationReport.observers = observer
-			classificationReport.reducers = reducer
-			classificationReport.specTypeID = spectype_id
-			classificationReport.spectrumComments = spec_comments
-			classificationReport.groupID = source_group
-			classificationReport.spec_proprietary_period_value = proprietary_period
-			classificationReport.spec_proprietary_period_units = proprietary_units
-			pprint.pprint(classificationReport.classificationDict(),indent=2)
-			proceed = raw_input("Proceed with classification upload? (y/n) : ")
-			if(proceed[0]=='y'):
-				if res_code == 200:
-					reportResult = submitClassificationReport(report_url, classificationReport, API_KEY)
-					try:
-						res_code = reportResult['id_code']
-						res_message = reportResult['id_message']
-						report_id = reportResult['data']['report_id']
-					except:
-						res_code = '0'
-						res_message = 'Bad response, something went wrong during report submission.'
-
-				if res_code == 200:
-					replyResult = receiveFeedback(reply_url, report_id, API_KEY)
-					try:
-			   			res_code = replyResult['id_code']
-			   			res_message = replyResult['id_message']
-					except:
-			   			res_code = '0'
-			   			res_message = 'Bad response, something went wrong during reply retrieval.'
-				print res_code, res_message
-			if(res_code==200):
-				payload1 = {'action':'commit','id':-1,'sourceid':str(source['id']),'datatype':'STRING','type':'TNS_upload_date','comment':str(datetime.date.today())}
-				b = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/add_autoannotation.cgi', auth=(username, password),
-                data=payload1)
-
+if __name__ == '__main__':
+    main(args,username,password)
 
 
 		

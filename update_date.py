@@ -7,7 +7,7 @@ import jd_to_date as jd2date
 import sys,getopt,argparse
 import simplejson
 import lxml.html 
-import re
+import re, getpass
 
 def get_sourcelist(username, password):
 	r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/list_programs.cgi', auth=(username, password))

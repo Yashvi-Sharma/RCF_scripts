@@ -8,6 +8,7 @@ import sys,getopt,argparse
 import simplejson
 from lxml import html
 from pick import pick
+import getpass
 
 
 def main(argv):

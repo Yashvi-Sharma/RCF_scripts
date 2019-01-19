@@ -9,7 +9,7 @@ import simplejson
 from lxml import html 
 import re, os
 import query_tns
-import pprint
+import pprint, getpass
 
 def get_sourcelist(username, password):
 	r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/list_programs.cgi', auth=(username, password))
@@ -25,15 +25,15 @@ def get_sourcelist(username, password):
 		r = requests.post('http://skipper.caltech.edu:8080/cgi-bin/growth/list_program_sources.cgi', auth=(username, password),
 			data={'programidx' : str(programidx)})
 		sources = json.loads(r.text)
-		url = open('urlfile','r').readlines()[0]
-		s = requests.post(url,auth=(username, password))
-		specpage = html.fromstring(s.content)
-	return sources, specpage
+		# url = open('urlfile','r').readlines()[0]
+		# s = requests.post(url,auth=(username, password))
+		# specpage = html.fromstring(s.content)
+	return sources
 
 #ZTF_name = sys.argv[1]
 username = raw_input('Input Marshal username: ')
 password = getpass.getpass('Password: ')
-sources, specpage = get_sourcelist(username,password)
+sources = get_sourcelist(username,password)
 source_not_reported = []
 SEDM_spec_uploaded = []
 other_spec = []

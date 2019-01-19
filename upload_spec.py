@@ -11,6 +11,7 @@ import argparse
 import os
 import re
 import glob2
+import getpass
 
 def makeparser():#def_progname,def_tel_inst,def_obsdate,def_observer,def_reducer):
   parser = argparse.ArgumentParser()
